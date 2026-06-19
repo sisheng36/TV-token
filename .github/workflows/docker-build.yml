@@ -2,12 +2,8 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [main, master]
-    paths:
-      - "main.go"
-      - "go.mod"
-      - "Dockerfile"
-      - ".github/workflows/docker-build.yml"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 env:
@@ -44,7 +40,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha,prefix=,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
       - name: Build and push
