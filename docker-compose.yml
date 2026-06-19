@@ -9,3 +9,19 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/oauth/alipan/token || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  your-other-project:
+    image: your-other-image:latest
+    container_name: your-other-project
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      alipan-tv-token:
+        condition: service_healthy
