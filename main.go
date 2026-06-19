@@ -50,6 +50,7 @@ type TokenEncryptedResp struct {
 type TokenInfo struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
 }
 
 type CheckResult struct {
@@ -70,6 +71,7 @@ func getParams(t int64) map[string]string {
 		"m":       "23046RP50C",
 		"mac":     "",
 		"n":       "23046RP50C",
+		"t":       strconv.FormatInt(t, 10),
 		"wifiMac": "020000000000",
 	}
 }
@@ -263,8 +265,52 @@ func handleGenerateQR(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// exchangeToken sends params to the token API, decrypts, returns TokenInfo.
+func exchangeToken(params map[string]string) (*TokenInfo, error) {
+	params["Content-Type"] = "application/json"
+	bodyJSON, _ := json.Marshal(params)
+
+	req, _ := http.NewRequest("POST", "https://api.extscreen.com/aliyundrive/v3/token", bytes.NewReader(bodyJSON))
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	for k, v := range params {
+		req.Header.Set(k, v)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	tokenResp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("token request: %w", err)
+	}
+	defer tokenResp.Body.Close()
+
+	tokenBody, _ := io.ReadAll(tokenResp.Body)
+	var tokenEnc TokenEncryptedResp
+	if err := json.Unmarshal(tokenBody, &tokenEnc); err != nil {
+		return nil, fmt.Errorf("decode token response: %w", err)
+	}
+
+	ts, _ := strconv.ParseInt(params["t"], 10, 64)
+	plainData, err := decrypt(tokenEnc.Data.Ciphertext, tokenEnc.Data.IV, ts)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt: %w", err)
+	}
+
+	var tokenInfo TokenInfo
+	if err := json.Unmarshal([]byte(plainData), &tokenInfo); err != nil {
+		return nil, fmt.Errorf("parse token json: %w", err)
+	}
+	return &tokenInfo, nil
+}
+
 func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
-	sid := strings.TrimPrefix(r.URL.Path, "/api/check/")
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sid := strings.TrimRight(strings.TrimPrefix(r.URL.Path, "/api/check/"), "/")
 	if sid == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing sid"})
 		return
@@ -287,44 +333,11 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	if statusData.Status == "LoginSuccess" && statusData.AuthCode != "" {
 		t := time.Now().Unix()
 		params := getParams(t)
-		params["t"] = strconv.FormatInt(t, 10)
 		params["code"] = statusData.AuthCode
-		params["Content-Type"] = "application/json"
 
-		bodyJSON, _ := json.Marshal(params)
-
-		req, _ := http.NewRequest("POST", "https://api.extscreen.com/aliyundrive/v3/token", bytes.NewReader(bodyJSON))
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-		req.Header.Set("Accept", "application/json, text/plain, */*")
-		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-		for k, v := range params {
-			req.Header.Set(k, v)
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		tokenResp, err := httpClient.Do(req)
+		tokenInfo, err := exchangeToken(params)
 		if err != nil {
-			writeJSON(w, http.StatusOK, CheckResult{Status: "LoginFailed"})
-			return
-		}
-		defer tokenResp.Body.Close()
-
-		tokenBody, _ := io.ReadAll(tokenResp.Body)
-		var tokenEnc TokenEncryptedResp
-		if err := json.Unmarshal(tokenBody, &tokenEnc); err != nil {
-			writeJSON(w, http.StatusOK, CheckResult{Status: "LoginFailed"})
-			return
-		}
-
-		plainData, err := decrypt(tokenEnc.Data.Ciphertext, tokenEnc.Data.IV, t)
-		if err != nil {
-			log.Printf("decrypt error: %v", err)
-			writeJSON(w, http.StatusOK, CheckResult{Status: "LoginFailed"})
-			return
-		}
-
-		var tokenInfo TokenInfo
-		if err := json.Unmarshal([]byte(plainData), &tokenInfo); err != nil {
+			log.Printf("token exchange error: %v", err)
 			writeJSON(w, http.StatusOK, CheckResult{Status: "LoginFailed"})
 			return
 		}
@@ -338,6 +351,74 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, CheckResult{Status: statusData.Status})
+}
+
+func handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var body struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.RefreshToken == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"code": 400, "message": "refresh_token is required", "data": nil,
+			})
+			return
+		}
+
+		t := time.Now().Unix()
+		params := getParams(t)
+		params["refresh_token"] = body.RefreshToken
+
+		tokenInfo, err := exchangeToken(params)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"code": 500, "message": err.Error(), "data": nil,
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"token_type":    "Bearer",
+			"access_token":  tokenInfo.AccessToken,
+			"refresh_token": tokenInfo.RefreshToken,
+			"expires_in":    tokenInfo.ExpiresIn,
+		})
+
+	case http.MethodGet:
+		refreshUI := r.URL.Query().Get("refresh_ui")
+		if refreshUI == "" {
+			writeJSON(w, http.StatusOK, map[string]string{
+				"refresh_token": "",
+				"access_token":  "",
+				"text":          "refresh_ui parameter is required",
+			})
+			return
+		}
+
+		t := time.Now().Unix()
+		params := getParams(t)
+		params["refresh_token"] = refreshUI
+
+		tokenInfo, err := exchangeToken(params)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]string{
+				"refresh_token": "",
+				"access_token":  "",
+				"text":          err.Error(),
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]string{
+			"refresh_token": tokenInfo.RefreshToken,
+			"access_token":  tokenInfo.AccessToken,
+			"text":          "",
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -362,6 +443,7 @@ func main() {
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/api/generate", handleGenerateQR)
 	mux.HandleFunc("/api/check/", handleCheckStatus)
+	mux.HandleFunc("/api/oauth/alipan/token", handleTokenRefresh)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -618,7 +700,7 @@ function handleAuth() {
   window.open(authUrl, "_blank");
   document.getElementById("authBtn").disabled = true;
   document.getElementById("authBtn").textContent = "授权中...";
-  checkTimer = setTimeout(() => checkStatus(currentSid), 2000);
+  checkTimer = setTimeout(() => checkStatus(currentSid), 1000);
 }
 
 async function checkStatus(sid) {
