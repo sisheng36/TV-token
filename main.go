@@ -26,6 +26,8 @@ import (
 	"golang.org/x/net/http2"
 )
 
+const version = "v1.0.0"
+
 // ============ data types ============
 
 type QRCodeResp struct {
@@ -427,7 +429,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(indexHTML))
+	w.Write([]byte(strings.Replace(indexHTML, "{{VERSION}}", version, 1)))
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
@@ -449,7 +451,7 @@ func main() {
 	if port == "" {
 		port = "3000"
 	}
-	log.Printf("阿里云盘TV Token 服务启动: http://0.0.0.0:%s\n", port)
+	log.Printf("阿里云盘TV Token %s 启动: http://0.0.0.0:%s\n", version, port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatal(err)
 	}
@@ -561,7 +563,7 @@ const indexHTML = `<!DOCTYPE html>
     <div class="icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4S5.33 6.59 4.65 10.04C2.35 10.28.5 12.28.5 14.5c0 2.48 2.02 4.5 4.5 4.5h13c2.48 0 4.5-2.02 4.5-4.5 0-2.22-1.85-4.22-4.15-4.46z" fill="url(#cloud-grad)"/><defs><linearGradient id="cloud-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#FF6A00"/><stop offset="100%" stop-color="#FF9500"/></linearGradient></defs></svg></div>
     <div>
       <h1>阿里云盘TV Token</h1>
-      <p>获取阿里云盘TV端的授权令牌，解锁高速下载</p>
+      <p>获取阿里云盘TV端的授权令牌，解锁高速下载 &middot; {{VERSION}}</p>
     </div>
   </div>
 
