@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -26,7 +25,11 @@ import (
 	"golang.org/x/net/http2"
 )
 
-const version = "v1.0.1"
+const version = "v1.0.2"
+
+const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+const acceptHeader = "application/json, text/plain, */*"
+const acceptLang = "zh-CN,zh;q=0.9,en;q=0.8"
 
 // ============ data types ============
 
@@ -59,7 +62,6 @@ type CheckResult struct {
 	Status       string `json:"status"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 	AccessToken  string `json:"access_token,omitempty"`
-	Error        string `json:"error,omitempty"`
 }
 
 // ============ crypto helpers ============
@@ -88,7 +90,10 @@ func h(chars []rune, modifier int64) string {
 	var sb strings.Builder
 	for _, c := range chars {
 		charCode := int(c)
-		newCharCode := int(math.Abs(float64(charCode-(numericModifier%127)-1)))
+		newCharCode := charCode - (numericModifier % 127) - 1
+		if newCharCode < 0 {
+			newCharCode = -newCharCode
+		}
 		if newCharCode < 33 {
 			newCharCode += 33
 		}
@@ -154,9 +159,9 @@ func doPost(url string, bodyJSON []byte) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", acceptHeader)
+	req.Header.Set("Accept-Language", acceptLang)
 	return httpClient.Do(req)
 }
 
@@ -165,9 +170,9 @@ func doGet(url string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", acceptHeader)
+	req.Header.Set("Accept-Language", acceptLang)
 	return httpClient.Do(req)
 }
 
@@ -235,7 +240,11 @@ func handleGenerateQR(w http.ResponseWriter, r *http.Request) {
 		"width":  500,
 		"height": 500,
 	}
-	bodyJSON, _ := json.Marshal(body)
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "内部错误"})
+		return
+	}
 
 	resp, err := doPost(
 		"https://api.extscreen.com/aliyundrive/qrcode",
@@ -248,7 +257,11 @@ func handleGenerateQR(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取响应失败"})
+		return
+	}
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("QR API returned %d", resp.StatusCode)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "上游服务异常"})
@@ -270,12 +283,18 @@ func handleGenerateQR(w http.ResponseWriter, r *http.Request) {
 // exchangeToken sends params to the token API, decrypts, returns TokenInfo.
 func exchangeToken(params map[string]string) (*TokenInfo, error) {
 	params["Content-Type"] = "application/json"
-	bodyJSON, _ := json.Marshal(params)
+	bodyJSON, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("marshal params: %w", err)
+	}
 
-	req, _ := http.NewRequest("POST", "https://api.extscreen.com/aliyundrive/v3/token", bytes.NewReader(bodyJSON))
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req, err := http.NewRequest("POST", "https://api.extscreen.com/aliyundrive/v3/token", bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", acceptHeader)
+	req.Header.Set("Accept-Language", acceptLang)
 	for k, v := range params {
 		req.Header.Set(k, v)
 	}
@@ -287,13 +306,19 @@ func exchangeToken(params map[string]string) (*TokenInfo, error) {
 	}
 	defer tokenResp.Body.Close()
 
-	tokenBody, _ := io.ReadAll(tokenResp.Body)
+	tokenBody, err := io.ReadAll(tokenResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read token response: %w", err)
+	}
 	var tokenEnc TokenEncryptedResp
 	if err := json.Unmarshal(tokenBody, &tokenEnc); err != nil {
 		return nil, fmt.Errorf("decode token response: %w", err)
 	}
 
-	ts, _ := strconv.ParseInt(params["t"], 10, 64)
+	ts, err := strconv.ParseInt(params["t"], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse timestamp: %w", err)
+	}
 	plainData, err := decrypt(tokenEnc.Data.Ciphertext, tokenEnc.Data.IV, ts)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt: %w", err)
@@ -325,7 +350,11 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取响应失败"})
+		return
+	}
 	var statusData StatusResp
 	if err := json.Unmarshal(respBody, &statusData); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "解析状态失败"})
@@ -489,7 +518,7 @@ const indexHTML = `<!DOCTYPE html>
   }
   .icon {
     width: 48px; height: 48px; border-radius: 12px;
-    background: linear-gradient(135deg, #14b8a6, #0d9488);
+    background: linear-gradient(135deg, #FF6A00, #FF9500);
     display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
   }
   .header h1 { font-size: 1.5rem; font-weight: 700; }
@@ -515,7 +544,7 @@ const indexHTML = `<!DOCTYPE html>
     transition: all 0.2s;
   }
   .btn-primary {
-    background: linear-gradient(135deg, #14b8a6, #0d9488);
+    background: linear-gradient(135deg, #FF6A00, #FF9500);
     color: #fff; width: 100%; justify-content: center;
     padding: 0.875rem 1rem; font-size: 1rem;
   }
@@ -523,11 +552,11 @@ const indexHTML = `<!DOCTYPE html>
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-ghost { background: transparent; color: #94a3b8; }
   .btn-ghost:hover { background: #334155; }
-  .btn-copy { background: transparent; color: #14b8a6; font-size: 0.8rem; padding: 0.25rem 0.5rem; }
-  .btn-copy:hover { background: #0f2a2a; }
+  .btn-copy { background: transparent; color: #FF9500; font-size: 0.8rem; padding: 0.25rem 0.5rem; }
+  .btn-copy:hover { background: #2d1a00; }
   .flex-row { display: flex; align-items: center; justify-content: space-between; }
   .loading { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 2rem 0; color: #64748b; }
-  .spinner { width: 2rem; height: 2rem; border: 3px solid #334155; border-top-color: #14b8a6; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  .spinner { width: 2rem; height: 2rem; border: 3px solid #334155; border-top-color: #FF6A00; border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .success { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 2rem 0; color: #34d399; }
   .success-icon { width: 64px; height: 64px; border-radius: 50%; background: #022c22; display: flex; align-items: center; justify-content: center; font-size: 2rem; }
