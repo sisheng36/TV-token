@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/md5"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -12,12 +14,16 @@ import (
 	"io"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
+	"golang.org/x/net/http2"
 )
 
 // ============ data types ============
@@ -118,6 +124,49 @@ func generateKey(t int64) string {
 	return hex.EncodeToString(hash[:])
 }
 
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http2.Transport{
+		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: 10 * time.Second}
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			host, _, _ := net.SplitHostPort(addr)
+			uconn := utls.UClient(conn, &utls.Config{ServerName: host}, utls.HelloChrome_Auto)
+			if err := uconn.HandshakeContext(ctx); err != nil {
+				conn.Close()
+				return nil, fmt.Errorf("utls handshake: %w", err)
+			}
+			return uconn, nil
+		},
+	},
+}
+
+func doPost(url string, bodyJSON []byte) (*http.Response, error) {
+	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	return httpClient.Do(req)
+}
+
+func doGet(url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	return httpClient.Do(req)
+}
+
 func pkcs7Unpad(data []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("data is empty")
@@ -184,12 +233,12 @@ func handleGenerateQR(w http.ResponseWriter, r *http.Request) {
 	}
 	bodyJSON, _ := json.Marshal(body)
 
-	resp, err := http.Post(
+	resp, err := doPost(
 		"https://api.extscreen.com/aliyundrive/qrcode",
-		"application/json",
-		bytes.NewReader(bodyJSON),
+		bodyJSON,
 	)
 	if err != nil {
+		log.Printf("QR API request failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "生成二维码失败"})
 		return
 	}
@@ -197,6 +246,7 @@ func handleGenerateQR(w http.ResponseWriter, r *http.Request) {
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("QR API returned %d", resp.StatusCode)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "上游服务异常"})
 		return
 	}
@@ -220,7 +270,7 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := http.Get("https://openapi.alipan.com/oauth/qrcode/" + sid + "/status")
+	resp, err := doGet("https://openapi.alipan.com/oauth/qrcode/" + sid + "/status")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "查询状态失败"})
 		return
@@ -244,12 +294,15 @@ func handleCheckStatus(w http.ResponseWriter, r *http.Request) {
 		bodyJSON, _ := json.Marshal(params)
 
 		req, _ := http.NewRequest("POST", "https://api.extscreen.com/aliyundrive/v3/token", bytes.NewReader(bodyJSON))
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "application/json, text/plain, */*")
+		req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 		for k, v := range params {
 			req.Header.Set(k, v)
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		tokenResp, err := http.DefaultClient.Do(req)
+		tokenResp, err := httpClient.Do(req)
 		if err != nil {
 			writeJSON(w, http.StatusOK, CheckResult{Status: "LoginFailed"})
 			return
