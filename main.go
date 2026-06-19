@@ -26,7 +26,7 @@ import (
 	"golang.org/x/net/http2"
 )
 
-const version = "v1.0.0"
+const version = "v1.0.1"
 
 // ============ data types ============
 
@@ -465,6 +465,11 @@ const indexHTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>阿里云盘TV Token</title>
+<meta property="og:title" content="阿里云盘TV Token">
+<meta property="og:description" content="获取阿里云盘TV端的授权令牌，解锁高速下载">
+<meta property="og:image" content="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNTYiIGhlaWdodD0iMjU2IiB2aWV3Qm94PSIwIDAgMjU2IDI1NiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiNGRjZBMDAiLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNGRjk1MDAiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMjU2IiBoZWlnaHQ9IjI1NiIgcng9IjQ4IiBmaWxsPSIjZmZmIi8+PHBhdGggZD0iTTIwNi4xMyAxMDYuN0MxOTcuODcgNjQuNTcgMTYxLjIgMzMgMTI4IDMzUzU4LjEzIDY0LjU3IDQ5Ljg3IDEwNi43QzIxLjgzIDEwOS42IDAgMTMzLjEgMCAxNjJjMCAzMS44IDI1LjgyIDU3LjUgNTcuNSA1Ny41aDEzNmMzMS43OCAwIDU3LjUtMjUuNzIgNTcuNS01Ny41IDAtMjguOS0yMS44My01Mi40LTQ0Ljg3LTU1LjN6IiBmaWxsPSJ1cmwoI2JnKSIvPjwvc3ZnPgo=">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
 <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64,AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAABMLAAATCwAAAAAAAAAAAAD+bmoB/nFpS/5yaMb+dGjz/ndo/f55aP/+fWn//oBq//6Da//+hm3//Yhv//2Kcv39jHXz/Y14xv2Ne0v9kIMB/3FpTP5yaOL+c2j//nZo//54aP/+emf//nxn//6Aaf/+hGz//oZt//2Gbf/9iXH//Yt1//2MeP/9jXzi/Y1+TP9xaMX+c2j//nVo//53aP/+eGb//oNx//6omf//yL7//9XM///Pxf/+t6j//paC//6JdP/9i3j//Yx8//2Mf8X/c2jy/nRo//52aP/+d2b//pSF///b1v///Pz///////////////////7+///q5//+r6L//op4//6Ke//9i3/y/3Ro/f92aP/+dmb//o+A///n4/////////Du///Mwv//uqz//8a7///p5f////////b0//6uo//+iHr//ol//P92aP//d2j//3tr///Nxv///////+Tg//6Zh//+gWn//oFo//6DbP/+k4D//9XO////////6eb//pWK//6Hfv//d2j//3dm//+Qgf//8/H///n4//6ikv/+fWb//oFq//6DbP/+hW7//oNu//6UhP//6+n///Du//6jnP/+hX7//3lo//94Zf//ppn////////k3//+hnH//oBp//6Cav/+g2z//oRu//6Oe///wbj//+Dc//6dk//+iID//oeB//96aP//eWX//6yg////////3df//4Nt//6Aaf/+gmv//oNt//6Dbv/+m4v///f2///s6//+kIb//oV+//6Hgv//e2j//3pm//+hkv///Pz//+7q//+Pe//+gGj//oJr//6Ebf/+gm3//qyg///+/v//5OL//oyE//6GgP/+h4P//3xo//98Z///i3f//+jk////////yL7//4hy//+Bav/+gm3//paG///i3v///////8bB//6Gfv/+hoL//oeF//99aP3/fmj//35n//+zpf//+/r///38///e2P//wbX//8e9///r5////////+ro//+Yj//+hn///oeD//6Hh/z/fmjy/39o//9/aP//g2z//7qt///08v///////////////////v7//+Xi//+imf//hn3//4eB//+Hhf//iIjy/39nxf9/aP//gGj//4Bo//+Bav//mof//76z///Ryf//zcX//7Sq//+RhP//hXr//4d///+Hgv//iIb//4mJxf9/Z0z/f2ji/4Bo//+Aaf//gGn//39p//+Aav//g27//4Nw//+Dcv//hXf//4d8//+Hf///iIP//4mH4v+JiUz/fmcB/4BoS/+AaMb/gGnz/4Fq/f+Bav//gWz//4Ju//+Ecf//hXX//4Z4//+HfP3/iIDz/4mDxv+Jhkv/io8BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
